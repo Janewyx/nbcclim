@@ -28,6 +28,7 @@ library(tidyverse)
 library(testthat)
 library(lubridate)
 library(glue)
+library(janitor)
 
 `%nin%` <- Negate(`%in%`)
 col_list <- c(
@@ -47,11 +48,14 @@ col_list <- c(
 if (!dir.exists("data/processed")) {
   dir.create("data/processed")
 }
-new_data_dir <- "data/FERNNorth2024_VF/WxData24/"
+new_data_dir <- "data/2026_update/"
 
 ## station list to be updated
 ## reading in updated files with new wind records
 updates <- dir(new_data_dir, pattern = "csv", full.names = TRUE)
+if (length(updates) == 0) {
+  stop(glue("No CSV updates found under {new_data_dir}"))
+}
 
 ## station lat long info, rename stations according to update csvs
 ## left to the ~ is Vanesssa's metadata lookup's station name,
@@ -93,16 +97,23 @@ sites <- readxl::read_excel(
     TRUE ~ station_name
   ))
 
+test_that("All updated csv basenames exist in metadata", {
+  update_names <- updates |>
+    basename() |>
+    stringr::str_remove("\\.csv$") |>
+    sort()
 
-test_that("All of updated csvs are contained in metadata station list", {
-  expect_equal(
-      str_remove(basename(updates), ".csv"),
-      sort(sites$station_name)
-  )
-})
+  meta_names <- sites$station_name |> sort()
+
+  expect_true(setequal(update_names, meta_names))
+
+  })
+
+glue("Total station this update ",
+           length(updates))
 
 ## column variables that may or may not be existent
-optional_cols = c(
+optional_cols <- c(
   "Water Content 15cm",
   "Water Content 5cm",
   "Water Content 30cm",
@@ -120,93 +131,146 @@ optional_col_lookup <- c(
   ST_avg  = "Soil Temp"
 )
 
+# function to pick a column name from a vector of column names
+# based on a pattern and a negate pattern
+# used is a vector of column names that have already been used
+# negate_pattern is a pattern to exclude from the column names
+pick_col <- function(nms, pattern, used = character(), negate_pattern = NULL) {
+  idx <- stringr::str_detect(nms, pattern)
+  if (!is.null(negate_pattern)) {
+    idx <- idx & !stringr::str_detect(nms, negate_pattern)
+  }
+  candidates <- setdiff(nms[idx], used)
+  if (length(candidates) == 0) {
+    return(NA_character_)
+  }
+  candidates[1]
+}
+
+pick_col_any <- function(nms, patterns, used = character()) {
+  for (pattern in patterns) {
+    picked <- pick_col(nms, pattern, used = used)
+    if (!is.na(picked)) {
+      return(picked)
+    }
+  }
+  NA_character_
+}
+
 ## adding new records to originals, then output to directory
-for (i in 1:length(updates)) {
+for (file_i in seq_along(updates)) {
+  glue("Processing file {updates[file_i]}")
+  df <- read.csv(updates[file_i], check.names = FALSE, encoding = "UTF-8") |>
+    clean_names()
 
-  df <- read.csv(updates[i], check.names = FALSE, encoding = "UTF-8")
+  raw_names <- names(df)
 
-  # some dfs don't have the "Date" column:
-  if (grepl("date", gsub("[[:space:]]", "", tolower(names(df)[1])))) {
-    names(df)[1] <- "Date"
-    names(df)[2] <- "Day"
+  date_name <- pick_col(raw_names, "^(date|datetime|time_stamp|timestamp)")
+  day_name <- pick_col(raw_names, "^day$", used = date_name)
 
+  # some dfs don't have a datetime column
+  if (!is.na(date_name)) {
+    names(df)[names(df) == date_name] <- "Date"
+    if (!is.na(day_name)) {
+      names(df)[names(df) == day_name] <- "Day"
+    } else {
+      df$Day <- substr(df$Date, 1, 10)
+    }
     df$Day <- substr(df$Date, 1, 10)
   } else {
     # No datetime column present, add it with Day column for analysis consistency
-    names(df)[1] <- "Day"
+    if (!is.na(day_name)) {
+      names(df)[names(df) == day_name] <- "Day"
+    } else {
+      names(df)[1] <- "Day"
+    }
     df$Date <- df$Day
-
-    # reorder columns
-    df <- df |>
-      select(Date, Day, everything())
   }
 
-  fname <- str_match(basename(updates[i]), "(.*)\\..*$")[,2]
+  df <- df |>
+    select(Date, Day, everything())
 
-  ## look for weird names that cannot be detected by the grep() function below
-  print(glue::glue("--------------------------------- processing {updates[i]}"))
-  print(glue("Data range: {range(df$Date)}"))
+  wc_5 <- pick_col_any(
+    names(df),
+    c("^water.*content.*(?:^|_)5(?:_|$)", "^wc.*(?:^|_)5(?:_|$)")
+  )
+  wc_30 <- pick_col_any(
+    names(df),
+    c("^water.*content.*(?:^|_)30(?:_|$)", "^wc.*(?:^|_)30(?:_|$)"),
+    used = wc_5
+  )
+  wc_15 <- pick_col_any(
+    names(df),
+    c(
+      "^water.*content.*(?:^|_)15(?:_|$)",
+      "^wc.*(?:^|_)15(?:_|$)",
+      "^wc_cal(_m3_m3)?$",
+      "^water_content_m3_m3$"
+    ),
+    used = c(wc_5, wc_30)
+  )
+
+  standardized_cols <- c(
+    Rain = pick_col(names(df), "^rain"),
+    Pressure = pick_col(names(df), "^pressure"),
+    Temp = pick_col(names(df), "^(temp|air_temp|temperature)", negate_pattern = "soil"),
+    RH = pick_col(names(df), "^(rh|relative_humidity)"),
+    DewPt = pick_col(names(df), "^(dewpt|dew_point|dew)"),
+    `Wind Speed` = pick_col(names(df), "^(wind.*speed|ws$)", negate_pattern = "gust"),
+    `Gust Speed` = pick_col(names(df), "^(gust.*speed|wind_gust|gs$)"),
+    `Wind Direction` = pick_col(names(df), "^(wind.*direction|wd$)"),
+    `Solar Radiation` = pick_col(names(df), "^(solar.*radiation|sr$)"),
+    `Water Content 5cm` = wc_5,
+    `Water Content 15cm` = wc_15,
+    `Water Content 30cm` = wc_30,
+    `Soil Temp` = pick_col(names(df), "^soil.*temp"),
+    Wetness = pick_col(names(df), "^wetness"),
+    `Snow depth` = pick_col(names(df), "^snow.*depth")
+  )
+
+  standardized_cols <- standardized_cols[!is.na(standardized_cols)]
+  for (new_name in names(standardized_cols)) {
+    old_name <- standardized_cols[[new_name]]
+    names(df)[names(df) == old_name] <- new_name
+  }
+
+  fname <- str_match(basename(updates[file_i]), "(.*)\\..*$")[,2]
+
+  glue("--------------------------------- processing {updates[file_i]}")
+  glue("Data range: {range(df$Date)}")
   print("Data shape (ncol, nrow) and unique datetimes: ")
   print(paste(ncol(df), nrow(df), length(unique(df$Date))))
 
 
-  ## keep the first 11 columns of interest as well as soil, water content,
-  ## wetness and snow depth
-  df <- df[, c(1:11,
-               # Water Content, m≥/m≥ 5 cm and Water Content, m≥/m≥ 15 cm
-               which(stringr::str_detect(names(df), "^Water Content.*5 cm$")),
-               # Water Content, m≥/m≥ 30 cm
-               which(stringr::str_detect(names(df), "^Water Content.*30 cm$")),
-               # Soil Temp, °C
-               which(stringr::str_detect(names(df), "^Soil Temp.*C$")),
-               # Wetness, %
-               grep("Wetness", names(df)),
-               # Snow depth
-               grep("Snow depth, cm", names(df)))]
+  ## keep expected weather columns as well as optional soil, moisture and snow data
+  df <- df |>
+    select(any_of(c(col_list, optional_cols)))
 
-  df$key = seq(1, nrow(df), 1)
+  df$key <- seq_len(nrow(df))
   print(names(df))
 
-  ## take the first few words before the comma separated names
-  for (i in 1:length(names(df))) {
-    if (str_detect(names(df)[i], "Water")) {
-      if (str_detect(names(df)[i], "15 cm")) {
-
-        names(df)[i] <- paste(str_split(names(df)[i], ",")[[1]][1], "15cm")
-        df$`Water Content 15cm`[toupper(df$`Water Content 15cm`) == "NAN"] <- NA
-
-      } else if (str_detect(names(df)[i], "30 cm")) {
-        names(df)[i] <- paste(str_split(names(df)[i], ",")[[1]][1], "30cm")
-        df$`Water Content 30cm`[toupper(df$`Water Content 30cm`) == "NAN"] <- NA
-
-      } else{
-        names(df)[i] <- paste(str_split(names(df)[i], ",")[[1]][1], "5cm")
-        df$`Water Content 5cm`[toupper(df$`Water Content 5cm`) == "NAN"] <- NA
-      }
-
-    } else {
-
-      names(df)[i] <- strsplit(str_remove(names(df)[i], "\\\\"), ",")[[1]][1]
-    }
-  }
+  glue("Finished cleaning column names for {fname}\n",
+       "Checking for expected columns and formatting data")
 
   # special case for Atlin
   if (toupper(fname) == "ATLIN SCHOOL") {
+    # Atlin station doesn't have pressure data (all NANs)
     df <- df |>
-      select(Date, Day, Rain, Temp = "Air Temp", RH, DewPt, "Wind Speed",
+      select(Date, Day, Rain, Temp, RH, DewPt, "Wind Speed",
              "Gust Speed", "Wind Direction", "Solar Radiation", "key")
   } else {
     # assuming first 11 columns are expected to be had by all stations, test this
     # is true from pre-defined column list.
+    glue("Formatted dataframe contains all of defined variables in the columns")
     test_that(
       "Formatted dataframe contains all of defined variables in the columns", {
         expect_equal(names(df)[1:11], col_list)
       })
 
-
+    glue("Formatted datafame only contains expected optional columns")
     test_that(
-      "Formatted datafame has 18 columns", {
-        expect_equal(ncol(df), 18)
+      "Formatted datafame only contains expected optional columns", {
+        expect_true(all(names(df) %in% c(col_list, optional_cols, "key")))
       }
     )
 
@@ -256,7 +320,7 @@ for (i in 1:length(updates)) {
     )
 
   ## if summing all NAs, return NA instead of 0
-  suma = function(x) if (all(is.na(x))) x[NA_integer_] else sum(x, na.rm = TRUE)
+  suma <- function(x) if (all(is.na(x))) x[NA_integer_] else sum(x, na.rm = TRUE)
 
   if (toupper(fname) == "ATLIN SCHOOL") {
     df_wx <- df_wx |>
@@ -338,7 +402,7 @@ for (i in 1:length(updates)) {
   # browser()
   write_csv(df_wx, paste0("data/processed/", fname, "_wx.csv"))
   write_csv(df_wind, paste0("data/processed/", fname, "_wind.csv"))
-  print(glue::glue("----------------------------- Finished processing {fname}"))
+  glue("----------------------------- Finished processing {fname}")
 
   # browser()
 

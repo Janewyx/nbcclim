@@ -167,5 +167,5 @@ wind_df <- hourly_df[, c("Site", "Day", "WS", "WD")]
 ## deleting NAs in Dates that do not contain any wind records
 wind_df <- wind_df[complete.cases(wind_df$Day), ]
 
-write_rds(wind_df, glue("data/hourly_{YEAR}.rds"), row.names = FALSE)
+write_rds(wind_df, glue("data/hourly_{YEAR}.rds"))
 

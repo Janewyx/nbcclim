@@ -31,7 +31,7 @@ following contains notes on annual data updates.
 1.  New station data is provided as one comma separated value file (csv)
     for each station. The file contains all of the station’s historical
     records up to date.
-2.  Scripts from `00_prep.R` to `04_output.R` under `R/` directory are
+2.  Scripts from `00_prep.R` to `05_output.R` under `R/` directory are
     run in four steps to integrate new station data to the application.
 3.  Once updated datasets are written to the `data/` folder, move them
     under `R/shiny/data` so the application contains updated datasets.

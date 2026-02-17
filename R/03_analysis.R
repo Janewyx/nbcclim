@@ -75,6 +75,7 @@ wind_df$WD <- cut(wind_df$WD, seq(-15, 375, 30), labels = c(seq(0, 330, 30), 0))
 
 ## classifying months to 4 seasons
 wind_df <- wind_df |>
+  mutate(months = month(Day, label = TRUE, abbr = TRUE)) |>
   mutate(
     seasons = case_when(
       months == "Dec"| months == "Jan" | months == "Feb" ~ "Winter",
@@ -88,7 +89,8 @@ wind_df <- wind_df |>
       months == "Feb" | months == "Mar" | months == "Apr" ~ "Winter",
       TRUE ~ "Summer"
     )
-  )
+  ) |>
+  select(-months)
 
 
 ## counting wind directions in each categories
