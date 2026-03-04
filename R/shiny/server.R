@@ -138,7 +138,7 @@ server <- function(input, output) {
           mapping = aes(as.Date(Date), value, group = years, colour = years,
                         text = paste("<br>Date:", Date, "<br>Value:", value))
           ) +
-        geom_line(size = 0.3, alpha = 0.7) +
+        geom_line(linewidth = 0.3, alpha = 0.7) +
         xlab("") +
         ylab("") +
         facet_grid(variable ~ ., scales = "free_y") +
@@ -223,7 +223,7 @@ server <- function(input, output) {
                            "<br>Date:", as.Date(Date), "<br>Value:", GS_max)
                          )
                      ) +
-        geom_line(size = 0.3, alpha = 0.7) +
+        geom_line(linewidth = 0.3, alpha = 0.7) +
         scale_x_date(date_breaks = "1 month", date_labels = "%b") +
         scale_colour_manual(values = pal) +
         xlab("") +
@@ -243,7 +243,7 @@ server <- function(input, output) {
               colour = years,
               text = paste("<br>Date:", as.Date(Date), "<br>Value:", GS_max))
           ) +
-          geom_line(size = 0.3, alpha = 0.7) +
+          geom_line(linewidth = 0.3, alpha = 0.7) +
           scale_x_date(date_breaks = "1 month", date_labels = "%b") +
           scale_colour_manual(values = pal) +
           xlab("") +
@@ -290,7 +290,7 @@ server <- function(input, output) {
               colour = years,
               text = paste("<br>Month:", Month, "<br>Value:", monthly_inso))
           ) +
-          geom_line(alpha = 0.7, size = 0.3, na.rm = TRUE) +
+          geom_line(alpha = 0.7, linewidth = 0.3, na.rm = TRUE) +
           # scale_x_date(date_labels = "%b") +
           scale_colour_manual(values = pal) +
           xlab("") +
@@ -332,7 +332,7 @@ server <- function(input, output) {
                 colour = years,
                 text = paste("<br>Month:", Month, "<br>Value:", monthly_inso))
             ) +
-          geom_line(alpha = 0.7, size = 0.3, na.rm = TRUE) +
+          geom_line(alpha = 0.7, linewidth = 0.3, na.rm = TRUE) +
           # scale_x_date(date_labels = "%b") +
           scale_colour_manual(values = pal) +
           xlab("") +
